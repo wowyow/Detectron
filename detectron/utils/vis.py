@@ -104,8 +104,8 @@ def vis_mask(img, mask, col, alpha=0.4, show_border=True, border_thick=1):
     img[idx[0], idx[1], :] += alpha * col
 
     if show_border:
-        contours = cv2.findContours(
-            mask.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)[-2]
+        _, contours, _ = cv2.findContours(
+            mask.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
         cv2.drawContours(img, contours, -1, _WHITE, border_thick, cv2.LINE_AA)
 
     return img.astype(np.uint8)
@@ -222,6 +222,9 @@ def vis_one_image_opencv(
     sorted_inds = np.argsort(-areas)
 
     for i in sorted_inds:
+        if classes[i] < 2 or classes[i] > 8:
+            continue
+
         bbox = boxes[i, :4]
         score = boxes[i, -1]
         if score < thresh:
@@ -249,6 +252,36 @@ def vis_one_image_opencv(
 
     return im
 
+def masks_only(boxes,segms,keypoints,wanted_classes,thresh):
+	if isinstance(boxes, list):
+		boxes, segms, keypoints, classes = convert_from_cls_format(
+	            boxes, segms, keypoints)
+
+	if segms is not None and len(segms) > 0:
+                masks = mask_util.decode(segms)	
+
+	if boxes is None:
+	    sorted_inds = [] # avoid crash when 'boxes' is None
+	else:
+	    # Display in largest to smallest order to reduce occlusion
+	    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+	    sorted_inds = np.argsort(-areas)            
+	
+	bbox = boxes[:, :4]
+        score = boxes[:, -1]
+
+	classes = np.array(classes)
+	
+	#impt_idxs = np.where(np.logical_and(np.logical_and((classes[sorted_inds] >= 2), (classes[sorted_inds] <= 8)),score>=thresh))[0]
+	if wanted_classes == []:
+		impt_idxs =  np.where(score>=thresh)[0]
+	else:
+		impt_idxs = [i for i in range(len(classes)) if classes[i] in wanted_classes and score[i]>= thresh]
+	if len(impt_idxs) == 0:
+	    save_arr = np.array([])
+	else:
+	    save_arr = masks[:,:,impt_idxs]
+	return save_arr,bbox[impt_idxs,:],classes[impt_idxs]
 
 def vis_one_image(
         im, im_name, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
@@ -291,12 +324,18 @@ def vis_one_image(
         sorted_inds = np.argsort(-areas)
 
     mask_color_id = 0
+    impt_idxs = []
     for i in sorted_inds:
+        if classes[i] < 2 or classes[i] > 8:
+                continue
+        
+
         bbox = boxes[i, :4]
         score = boxes[i, -1]
         if score < thresh:
             continue
 
+        impt_idxs.append(i)
         # show box (off by default)
         ax.add_patch(
             plt.Rectangle((bbox[0], bbox[1]),
@@ -328,8 +367,8 @@ def vis_one_image(
                 img[:, :, c] = color_mask[c]
             e = masks[:, :, i]
 
-            contour = cv2.findContours(
-                e.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)[-2]
+            _, contour, hier = cv2.findContours(
+                e.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
 
             for c in contour:
                 polygon = Polygon(
@@ -337,6 +376,7 @@ def vis_one_image(
                     fill=True, facecolor=color_mask,
                     edgecolor='w', linewidth=1.2,
                     alpha=0.5)
+
                 ax.add_patch(polygon)
 
         # show keypoints
@@ -392,3 +432,9 @@ def vis_one_image(
     output_name = os.path.basename(im_name) + '.' + ext
     fig.savefig(os.path.join(output_dir, '{}'.format(output_name)), dpi=dpi)
     plt.close('all')
+    if len(impt_idxs) ==0:
+        save_arr = np.array([])
+    else:
+        save_arr = masks[:,:,np.array(impt_idxs)]
+    np.save('/home/ubuntu/output/masks',save_arr)
+
